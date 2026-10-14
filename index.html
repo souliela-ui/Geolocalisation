@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Où est-ce ? — le jeu de la photo à situer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+:root {
+  --ink: #15232B; --ink-soft: #4C5F68; --bg: #EEF3F4; --panel: #FFFFFF; --line: #CFDCE0;
+  --answer: #D62839; --go: #15232B; --go-ink: #FFFFFF; --ok: #1B7F5B; --gold: #C99A06; --sea: #BFD8E1;
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 15px/1.5 "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; }
+h1, h2, h3 { font-family: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif; margin: 0; line-height: 1.1; }
+button, input { font: inherit; color: inherit; }
+
+header.top { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1.1rem clamp(1rem, 3vw, 2rem) .9rem; }
+header.top h1 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); font-weight: 800; letter-spacing: -.02em; }
+header.top h1 span { font-weight: 500; }
+.timer { display: flex; align-items: baseline; gap: .45rem; padding: .25rem .9rem; border-radius: 999px; background: var(--panel); border: 1.5px solid var(--line); }
+.timer b { font-family: "Bricolage Grotesque", sans-serif; font-size: 1.7rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; min-width: 2.2ch; text-align: right; }
+.timer small { color: var(--ink-soft); font-size: .85rem; }
+.timer.urgent { border-color: var(--answer); color: var(--answer); }
+.timer.urgent small { color: var(--answer); }
+.timer.over b { font-size: 1.1rem; }
+@media (prefers-reduced-motion: no-preference) { .timer.urgent b { animation: pulse 1s ease-in-out infinite; } }
+@keyframes pulse { 50% { opacity: .55; } }
+.status { color: var(--ink-soft); font-size: .92rem; display: flex; align-items: center; gap: .45rem; }
+.status .led { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-soft); }
+.status .led.on { background: var(--ok); }
+.status .led.off { background: var(--answer); }
+
+main { display: grid; gap: 1rem; grid-template-columns: minmax(290px, 390px) 1fr; padding: 0 clamp(1rem, 3vw, 2rem) 2rem; align-items: start; }
+@media (max-width: 880px) { main { grid-template-columns: 1fr; } }
+.side { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem; }
+.card h2 { font-size: 1.15rem; font-weight: 700; margin-bottom: .5rem; }
+.card p { margin: .35rem 0; }
+.muted { color: var(--ink-soft); }
+.small { font-size: .88rem; }
+.notice { border-left: 4px solid var(--answer); }
+.ok { color: var(--ok); font-weight: 600; }
+
+.postcard { position: relative; background: var(--panel); border-radius: 6px; padding: 10px 10px 34px; box-shadow: 0 1px 0 var(--line), 0 14px 30px -18px rgba(10, 30, 40, .45); transform: rotate(-1.2deg); }
+.postcard img { display: block; width: 100%; max-height: 58vh; object-fit: contain; background: var(--sea); border-radius: 2px; cursor: zoom-in; }
+.postcard .stamp { position: absolute; right: 14px; bottom: 6px; font-family: "Bricolage Grotesque", sans-serif; font-weight: 700; font-size: .95rem; color: var(--answer); }
+.postcard.empty { transform: none; padding: 2.2rem 1rem; text-align: center; color: var(--ink-soft); border: 2px dashed var(--line); box-shadow: none; }
+
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .9rem; }
+.steps li { display: grid; grid-template-columns: 1.7rem 1fr; gap: .6rem; }
+.steps .n { width: 1.7rem; height: 1.7rem; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--ink); font-weight: 600; font-size: .85rem; }
+.steps li.done .n { background: var(--ink); color: var(--panel); }
+.steps h3 { font-size: 1rem; font-weight: 700; margin: .15rem 0 .35rem; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; border: 0; border-radius: 999px; padding: .62rem 1.1rem; cursor: pointer; background: var(--go); color: var(--go-ink); font-weight: 600; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1.5px solid var(--line); }
+.btn.red { background: var(--answer); color: #fff; }
+.btn.wide { width: 100%; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn:focus-visible, input:focus-visible, .linkbtn:focus-visible { outline: 3px solid var(--answer); outline-offset: 2px; }
+.row { display: flex; gap: .5rem; align-items: center; }
+.row > input { flex: 1; min-width: 0; }
+.stack { display: flex; flex-direction: column; gap: .55rem; }
+label.f { display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; font-weight: 500; }
+input[type="text"] { width: 100%; padding: .55rem .75rem; border: 1.5px solid var(--line); border-radius: 8px; background: var(--bg); }
+input.code { font-family: "Bricolage Grotesque", sans-serif; font-size: 1.4rem; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; }
+.coords { font-variant-numeric: tabular-nums; }
+.bigcode { font-family: "Bricolage Grotesque", sans-serif; font-size: 2.6rem; font-weight: 800; letter-spacing: .14em; line-height: 1; margin: .3rem 0 .5rem; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--ink); text-decoration: underline; cursor: pointer; font-size: .88rem; }
+pre.rules { background: var(--bg); border-radius: 8px; padding: .6rem .75rem; font-size: .8rem; overflow-x: auto; margin: .4rem 0; }
+.steps a { color: var(--ink); }
+.results-search { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
+.results-search button { width: 100%; text-align: left; background: var(--bg); border: 0; border-radius: 8px; padding: .4rem .6rem; cursor: pointer; font-size: .88rem; }
+.results-search button:hover { background: var(--line); }
+
+.mapwrap { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.mapbar { padding: .6rem .9rem; border-bottom: 1px solid var(--line); font-size: .92rem; }
+#map { height: min(74vh, 680px); background: var(--sea); cursor: crosshair; }
+@media (max-width: 880px) { #map { height: 58vh; } }
+#map.locked { cursor: grab; }
+.leaflet-container { font-family: "IBM Plex Sans", "Segoe UI", sans-serif; }
+.pin { width: 18px; height: 18px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+.pin.ghost { opacity: .55; }
+.pin-answer { width: 26px; height: 26px; border-radius: 50%; background: var(--answer); border: 4px solid #fff; box-shadow: 0 0 0 3px var(--answer), 0 2px 8px rgba(0,0,0,.4); }
+.leaflet-tooltip.lbl { font-weight: 600; font-size: .82rem; padding: 2px 7px; }
+
+.rank { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+.rank li { display: grid; grid-template-columns: 1.6rem 12px 1fr auto; align-items: center; gap: .55rem; padding: .45rem .6rem; border-radius: 10px; background: var(--bg); }
+.rank li.win { outline: 2px solid var(--gold); }
+.rank li.me { font-weight: 600; }
+.rank li.off { opacity: .55; }
+.rank .pos { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.rank .dot { width: 12px; height: 12px; border-radius: 50%; }
+.rank .km { font-variant-numeric: tabular-nums; font-weight: 600; }
+.rank .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.winner { font-family: "Bricolage Grotesque", sans-serif; font-size: 1.45rem; font-weight: 800; letter-spacing: -.01em; margin: .2rem 0 .4rem; }
+
+dialog.viewer { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 96vh; }
+dialog.viewer::backdrop { background: rgba(5, 12, 15, .85); }
+dialog.viewer img { max-width: 96vw; max-height: 92vh; display: block; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { .postcard { transform: none; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Où est-ce&nbsp;? <span id="roundLabel"></span></h1>
+  <div class="timer" id="timer" hidden aria-live="polite"><b id="timerVal"></b><small id="timerLbl">secondes</small></div>
+  <div class="status"><span class="led" id="led"></span><span id="statusText">Pas encore connecté</span></div>
+</header>
+<main>
+  <section class="side" id="side"></section>
+  <section>
+    <div class="mapwrap">
+      <div class="mapbar" id="mapHint">Molette pour zoomer, glisser pour déplacer. Bouton en haut à droite : plan, satellite ou relief.</div>
+      <div id="map"></div>
+    </div>
+  </section>
+</main>
+<dialog class="viewer" id="viewer"><img id="viewerImg" alt="Photo en grand"></dialog>
+
+<script>
+(function () {
+"use strict";
+const SOURCE = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;   // pour fabriquer le fichier à envoyer aux joueurs
+/* Adresse de la base Firebase Realtime Database. Renseignée automatiquement dans le fichier téléchargé depuis le jeu. */
+const BAKED_DB_URL = /*FB*/""/*FB*/;
+
+/* ===== Outils ===== */
+const $ = id => document.getElementById(id);
+const side = $("side");
+function h(tag, props, ...kids) {
+  const n = document.createElement(tag);
+  if (props) for (const k in props) {
+    const v = props[k];
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) n.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return n;
+}
+const toRad = d => d * Math.PI / 180, toDeg = r => r * 180 / Math.PI;
+function haversineKm(a, b) {
+  const R = 6371.0088, dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+}
+function greatCircle(a, b, n) {
+  const v = p => [Math.cos(toRad(p.lat)) * Math.cos(toRad(p.lon)), Math.cos(toRad(p.lat)) * Math.sin(toRad(p.lon)), Math.sin(toRad(p.lat))];
+  const A = v(a), B = v(b), d = Math.acos(Math.max(-1, Math.min(1, A[0] * B[0] + A[1] * B[1] + A[2] * B[2])));
+  if (d < 1e-9) return [[a.lat, a.lon], [b.lat, b.lon]];
+  const out = []; let prev = null;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, k1 = Math.sin((1 - t) * d) / Math.sin(d), k2 = Math.sin(t * d) / Math.sin(d);
+    const x = k1 * A[0] + k2 * B[0], y = k1 * A[1] + k2 * B[1], z = k1 * A[2] + k2 * B[2];
+    let lon = toDeg(Math.atan2(y, x)); const lat = toDeg(Math.atan2(z, Math.hypot(x, y)));
+    if (prev !== null) { while (lon - prev > 180) lon -= 360; while (lon - prev < -180) lon += 360; }
+    prev = lon; out.push([lat, lon]);
+  }
+  return out;
+}
+const nf0 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+const nf4 = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+const fmtKm = km => km < 1 ? nf0.format(km * 1000) + " m" : km < 10 ? nf1.format(km) + " km" : nf0.format(km) + " km";
+const fmtCoord = p => nf4.format(Math.abs(p.lat)) + "° " + (p.lat >= 0 ? "N" : "S") + ", " + nf4.format(Math.abs(p.lon)) + "° " + (p.lon >= 0 ? "E" : "O");
+function parseCoords(txt) {
+  const m = String(txt).trim().match(/^(-?\d+(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d+(?:[.,]\d+)?)$/);
+  if (!m) return null;
+  const lat = parseFloat(m[1].replace(",", ".")), lon = parseFloat(m[2].replace(",", "."));
+  return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 ? { lat, lon } : null;
+}
+const COLORS = ["#2E86AB", "#7B2CBF", "#1B998B", "#F18F01", "#3D5A80", "#9C6644", "#E07A5F", "#5C946E", "#C44569", "#30336B"];
+const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const PREFIX = "ouestce-jeu-";
+const randCode = n => Array.from(crypto.getRandomValues(new Uint32Array(n)), x => CODE_CHARS[x % CODE_CHARS.length]).join("");
+const store = {
+  get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignoré */ } }
+};
+const libsOk = typeof window.L !== "undefined" && typeof window.firebase !== "undefined";
+const DB_URL = BAKED_DB_URL || store.get("ouestce-dburl") || "";
+const DB_URL_RE = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.(firebaseio\.com|firebasedatabase\.app)\/?$/i;
+
+/* ===== Connexion Firebase (HTTPS, compatible avec les proxys d'entreprise) ===== */
+let db = null, srvOffset = 0, fbConnected = false, onConn = null;
+function fbStart(url) {
+  firebase.initializeApp({ databaseURL: url.replace(/\/$/, "") });
+  db = firebase.database();
+  db.ref(".info/serverTimeOffset").on("value", s => { srvOffset = s.val() || 0; });
+  db.ref(".info/connected").on("value", s => { fbConnected = !!s.val(); if (onConn) onConn(fbConnected); });
+}
+const serverNow = () => Date.now() + srvOffset;
+const TS = () => firebase.database.ServerValue.TIMESTAMP;
+function waitConnected(ms) {
+  return new Promise(res => {
+    if (fbConnected) return res(true);
+    const ref = db.ref(".info/connected"), t = setTimeout(() => { ref.off("value", f); res(false); }, ms);
+    const f = s => { if (s.val()) { clearTimeout(t); ref.off("value", f); res(true); } };
+    ref.on("value", f);
+  });
+}
+function fbErrText(e) {
+  return e && /permission/i.test(e.code || e.message || "") ?
+    "La base refuse l'accès : vérifiez que les règles ont bien été publiées (étape 3 de la configuration)." :
+    "Échange impossible avec la base (" + ((e && (e.code || e.message)) || "erreur") + ").";
+}
+function bakedFile() {
+  const mk = "/*" + "FB*/";
+  return SOURCE.replace(mk + '""' + mk, mk + JSON.stringify(DB_URL) + mk);
+}
+function downloadBaked() {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([bakedFile()], { type: "text/html" }));
+  a.download = "ou-est-ce.html"; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+if (libsOk && DB_URL) fbStart(DB_URL);
+
+/* ===== Carte ===== */
+let map = null, ov = null, onPick = null;
+if (window.L) {
+  map = L.map("map", { worldCopyJump: true, minZoom: 2, zoomSnap: 0.5 }).setView([30, 10], 2);
+  // Fonds de carte sans clé d'API. OpenStreetMap exige une page servie en http(s) : il n'est proposé que dans ce cas.
+  const esri = svc => "https://server.arcgisonline.com/ArcGIS/rest/services/" + svc + "/MapServer/tile/{z}/{y}/{x}";
+  const bases = {
+    "Plan": L.tileLayer(esri("World_Street_Map"), { maxZoom: 19, attribution: "Fond © Esri, HERE, Garmin, © contributeurs OpenStreetMap" }),
+    "Satellite": L.tileLayer(esri("World_Imagery"), { maxZoom: 19, attribution: "Imagerie © Esri, Maxar, Earthstar Geographics" }),
+    "Relief": L.tileLayer(esri("World_Topo_Map"), { maxZoom: 19, attribution: "Fond © Esri, HERE, Garmin, © contributeurs OpenStreetMap" })
+  };
+  if (/^https?:/.test(location.protocol)) {
+    bases["OpenStreetMap"] = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© contributeurs OpenStreetMap" });
+  }
+  // Bascule automatique vers le fond suivant si un fond ne répond pas (aucune tuile chargée, plusieurs erreurs).
+  const order = Object.keys(bases);
+  order.forEach((name, i) => {
+    let ok = 0, ko = 0;
+    bases[name].on("tileload", () => { ok++; });
+    bases[name].on("tileerror", () => {
+      ko++;
+      if (ok === 0 && ko === 6 && map.hasLayer(bases[name])) {
+        const next = order[(i + 1) % order.length];
+        map.removeLayer(bases[name]); bases[next].addTo(map);
+      }
+    });
+  });
+  bases["Plan"].addTo(map);
+  L.control.layers(bases, null, { position: "topright" }).addTo(map);
+  ov = L.layerGroup().addTo(map);
+  map.on("click", e => { if (onPick) { const w = e.latlng.wrap(); onPick(w.lat, w.lng); } });
+}
+function setPickable(on) { $("map").classList.toggle("locked", !on); }
+function dotIcon(color, ghost) { return L.divIcon({ className: "", html: `<div class="pin${ghost ? " ghost" : ""}" style="background:${color}"></div>`, iconSize: [18, 18], iconAnchor: [9, 9] }); }
+const answerIcon = () => L.divIcon({ className: "", html: '<div class="pin-answer"></div>', iconSize: [26, 26], iconAnchor: [13, 13] });
+function drawPins(list) {
+  if (!ov) return;
+  ov.clearLayers();
+  for (const p of list) {
+    if (p.arcTo) L.polyline(greatCircle(p, p.arcTo, 96), { color: p.color, weight: 2.5, dashArray: "7 6", opacity: .9 }).addTo(ov);
+  }
+  for (const p of list) {
+    const m = L.marker([p.lat, p.lon], { icon: p.answer ? answerIcon() : dotIcon(p.color, p.ghost), keyboard: false, zIndexOffset: p.answer ? 1000 : 0 }).addTo(ov);
+    if (p.label) m.bindTooltip(p.label, { permanent: true, direction: "right", offset: [12, 0], className: "lbl" });
+  }
+}
+function fitPoints(pts) {
+  if (!map || !pts.length) return;
+  if (pts.length === 1) { map.setView([pts[0].lat, pts[0].lon], 6); return; }
+  map.fitBounds(L.latLngBounds(pts.map(p => [p.lat, p.lon])), { padding: [60, 60], maxZoom: 12 });
+}
+
+/* ===== Photo ===== */
+const viewer = $("viewer");
+viewer.addEventListener("click", () => viewer.close());
+function photoCard(src, emptyText, stamp) {
+  if (!src) return h("div", { class: "postcard empty" }, emptyText);
+  return h("div", { class: "postcard" },
+    h("img", { src, alt: "Photo à situer", onclick: () => { $("viewerImg").src = src; viewer.showModal(); } }),
+    h("span", { class: "stamp", text: stamp }));
+}
+function reencode(file) {
+  // Ré-encodage : retire les métadonnées EXIF (dont le GPS) et allège l'envoi aux joueurs.
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 1800 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image")); };
+    img.src = url;
+  });
+}
+
+/* ===== Statut de connexion ===== */
+function setStatus(text, state) { $("statusText").textContent = text; $("led").className = "led" + (state ? " " + state : ""); }
+
+/* ===== Compte à rebours (affiché chez tout le monde) ===== */
+let deadline = null, onTimeUp = null;
+function startTimer(remainingMs, cb) { deadline = Date.now() + Math.max(0, remainingMs); onTimeUp = cb; paintTimer(); }
+function stopTimer() { deadline = null; onTimeUp = null; paintTimer(); }
+const timeIsUp = () => deadline !== null && Date.now() >= deadline;
+function paintTimer() {
+  const box = $("timer");
+  if (deadline === null) { box.hidden = true; return; }
+  box.hidden = false;
+  const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  const over = left === 0;
+  $("timerVal").textContent = over ? "Temps écoulé" : String(left);
+  $("timerLbl").textContent = over ? "" : left > 1 ? "secondes" : "seconde";
+  box.classList.toggle("urgent", left <= 10);
+  box.classList.toggle("over", over);
+}
+setInterval(() => {
+  if (deadline === null) return;
+  paintTimer();
+  if (timeIsUp() && onTimeUp) { const cb = onTimeUp; onTimeUp = null; cb(); }
+}, 200);
+
+/* ===== Écran d'accueil ===== */
+const S = { role: null, error: "", testing: false };
+const RULES = `{
+  "rules": {
+    "games": {
+      "$code": {
+        ".read": true,
+        ".write": true,
+        ".validate": "$code.matches(/^[A-Z0-9]{5}$/)"
+      }
+    }
+  }
+}`;
+function renderSetup() {
+  setPickable(false); onPick = null;
+  const urlIn = h("input", { type: "text", placeholder: "https://mon-jeu-default-rtdb.europe-west1.firebasedatabase.app", value: store.get("ouestce-dburl") || "" });
+  const copyBtn = h("button", { class: "btn ghost" }, "Copier les règles");
+  copyBtn.addEventListener("click", () => { navigator.clipboard && navigator.clipboard.writeText(RULES).then(() => { copyBtn.textContent = "Copié"; }); });
+  const save = async () => {
+    const url = urlIn.value.trim();
+    if (!DB_URL_RE.test(url)) { S.error = "L'adresse doit ressembler à https://nom-du-projet-default-rtdb.europe-west1.firebasedatabase.app"; renderSetup(); return; }
+    store.set("ouestce-dburl", url.replace(/\/$/, ""));
+    location.reload();
+  };
+  side.replaceChildren(
+    S.error ? h("div", { class: "card notice" }, h("p", { text: S.error })) : null,
+    h("div", { class: "card" }, h("h2", { text: "Configuration (une seule fois, par le maître du jeu)" }),
+      h("p", { class: "muted small", text: "Le jeu passe par une petite base gratuite Google Firebase, joignable en HTTPS comme un site web : elle fonctionne derrière les proxys d'entreprise. Les joueurs n'auront rien à configurer." }),
+      h("ol", { class: "steps", style: "margin-top:.8rem" },
+        h("li", null, h("span", { class: "n", text: "1" }), h("div", null, h("h3", { text: "Créer un projet" }),
+          h("p", { class: "small" }, "Sur ", h("a", { href: "https://console.firebase.google.com", target: "_blank", rel: "noopener" }, "console.firebase.google.com"), ", avec un compte Google : « Créer un projet », un nom au choix, Google Analytics désactivé."))),
+        h("li", null, h("span", { class: "n", text: "2" }), h("div", null, h("h3", { text: "Créer la base" }),
+          h("p", { class: "small", text: "Menu Créer › Realtime Database › Créer une base de données. Emplacement : Belgique (europe-west1). Démarrer en mode verrouillé." }))),
+        h("li", null, h("span", { class: "n", text: "3" }), h("div", null, h("h3", { text: "Coller les règles" }),
+          h("p", { class: "small", text: "Onglet Règles : remplacez tout le contenu par ceci, puis « Publier »." }),
+          h("pre", { class: "rules", text: RULES }), copyBtn)),
+        h("li", null, h("span", { class: "n", text: "4" }), h("div", { class: "stack" }, h("h3", { text: "Coller l'adresse de la base" }),
+          h("p", { class: "small", text: "Elle s'affiche en haut de l'onglet Données, avec une icône de lien." }),
+          urlIn, h("button", { class: "btn red", onclick: save }, "Enregistrer"))))));
+}
+function renderHome() {
+  if (!libsOk || !DB_URL) { if (libsOk) { renderSetup(); return; } }
+  setPickable(false); onPick = null; drawPins([]);
+  $("roundLabel").textContent = "";
+  const hashCode = (location.hash || "").replace("#", "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
+  const nameIn = h("input", { type: "text", id: "nameIn", maxlength: "30", placeholder: "Ex. : Sophie", value: store.get("ouestce-name") || "" });
+  const codeIn = h("input", { type: "text", class: "code", maxlength: "5", placeholder: "ABCDE", value: hashCode, autocomplete: "off" });
+  const join = () => {
+    const name = nameIn.value.trim(), code = codeIn.value.trim().toUpperCase();
+    if (!name) { S.error = "Indiquez votre prénom pour que les autres vous reconnaissent."; renderHome(); return; }
+    if (!/^[A-Z0-9]{5}$/.test(code)) { S.error = "Le code de partie fait 5 caractères, par exemple K7QMB."; renderHome(); return; }
+    store.set("ouestce-name", name); S.error = ""; startPlayer(name, code);
+  };
+  codeIn.addEventListener("keydown", e => { if (e.key === "Enter") join(); });
+  nameIn.addEventListener("keydown", e => { if (e.key === "Enter") join(); });
+  side.replaceChildren(
+    !libsOk ? h("div", { class: "card notice" }, h("p", { text: "Les composants du jeu n'ont pas pu se charger. Vérifiez la connexion Internet (ou un blocage du réseau de l'entreprise), puis rechargez la page." })) : null,
+    S.error ? h("div", { class: "card notice" }, h("p", { text: S.error })) : null,
+    h("div", { class: "card" }, h("h2", { text: hashCode ? "Vous êtes invité à jouer" : "Rejoindre une partie" }),
+      h("div", { class: "stack" },
+        h("label", { class: "f" }, "Votre prénom", nameIn),
+        h("label", { class: "f" }, "Code de la partie", codeIn),
+        h("button", { class: "btn red wide", disabled: !libsOk, onclick: join }, "Rejoindre"))),
+    h("div", { class: "card" }, h("h2", { text: "Organiser une partie" }),
+      h("p", { class: "muted small", text: "Vous choisissez les photos et les placez sur la carte. Gardez cette page ouverte pendant toute la partie : c'est elle qui arbitre." }),
+      h("button", { class: "btn ghost wide", disabled: !libsOk || S.testing, onclick: startGM }, S.testing ? "Connexion à la base…" : "Créer une partie (maître du jeu)"),
+      !BAKED_DB_URL ? h("p", { class: "small", style: "margin-top:.6rem" }, h("button", { class: "linkbtn", onclick: () => { S.error = ""; renderSetup(); } }, "Modifier l'adresse de la base")) : null)
+  );
+  if (hashCode) setTimeout(() => nameIn.focus(), 0);
+}
+
+/* =====================================================================
+   MAÎTRE DU JEU
+   ===================================================================== */
+const G = {
+  peer: null, code: "", players: new Map(),   // pid -> {name, conn, online, guess, wins, color}
+  round: 0, status: "idle",                    // idle | open | revealed
+  photo: null, secret: null,                   // manche en cours
+  draft: { photo: null, pos: null }, drafting: true,
+  results: [], busy: "", error: "", search: null,
+  duration: 60, endsAt: 0                      // durée de réponse (s) et fin de la manche (horloge du MJ)
+};
+async function startGM() {
+  S.testing = true; S.error = ""; renderHome();
+  const ok = await waitConnected(10000);
+  if (!ok) {
+    S.testing = false;
+    S.error = "La base Firebase est injoignable depuis ce réseau. Vérifiez l'adresse de la base ; si elle est bonne, le proxy de l'entreprise bloque peut-être *.firebasedatabase.app.";
+    renderHome(); return;
+  }
+  try {
+    let code = "";
+    for (let i = 0; i < 6; i++) { code = randCode(5); if (!(await db.ref("games/" + code + "/meta").get()).exists()) break; }
+    G.code = code; G.ref = db.ref("games/" + code);
+    await G.ref.set({ meta: { created: TS() }, host: { online: true } });
+  } catch (e) { S.testing = false; S.error = fbErrText(e); renderHome(); return; }
+  S.testing = false; S.role = "gm"; G.ready = true;
+  onConn = c => {
+    setStatus(c ? "Partie ouverte" : "Connexion perdue, reconnexion…", c ? "on" : "off");
+    if (c) { G.ref.child("host/online").onDisconnect().set(false); G.ref.child("host/online").set(true); }
+  };
+  onConn(fbConnected);
+  G.ref.child("presence").on("value", s => {
+    const pres = s.val() || {};
+    for (const [pid, p] of G.players) p.online = !!pres[pid];
+    publishLobby(); renderGM();
+  });
+  G.ref.child("inbox").on("child_added", s => { const d = s.val(); s.ref.remove(); gmOnData(d); });
+  window.addEventListener("beforeunload", e => { if (G.players.size) { e.preventDefault(); e.returnValue = ""; } });
+  renderGM();
+}
+function inviteLink() {
+  return /^https?:/.test(location.protocol) ? location.origin + location.pathname + "#" + G.code : null;
+}
+function publicState(forPid) {
+  const p = G.players.get(forPid);
+  const st = { t: "state", round: G.round, status: G.status };
+  if (G.status === "open") { st.endsAt = G.endsAt; st.duration = G.duration; }
+  if (G.status === "revealed") { st.answer = G.secret; st.results = G.results; }
+  if (G.status === "ended") st.final = finalStandings();
+  if (p && p.guess && p.guess.round === G.round) st.myGuess = { lat: p.guess.lat, lon: p.guess.lon };
+  if (p && p.late === G.round) st.late = true;
+  return st;
+}
+function lobbyMsg() {
+  return { players: [...G.players.entries()].map(([pid, p]) => ({
+    pid, name: p.name, online: !!p.online, wins: p.wins, color: p.color,
+    answered: !!(p.guess && p.guess.round === G.round && G.status === "open")
+  })) };
+}
+function sendState(pid) { G.ref.child("out/" + pid).set(publicState(pid)).catch(() => {}); }
+function publishLobby() { if (G.ref) G.ref.child("lobby").set(lobbyMsg()).catch(() => {}); }
+function publishAll() {
+  const upd = { lobby: lobbyMsg() };
+  for (const pid of G.players.keys()) upd["out/" + pid] = publicState(pid);
+  G.ref.update(upd).catch(e => { G.error = fbErrText(e); renderGM(); });
+}
+function gmOnData(d) {
+  if (!d || typeof d !== "object") return;
+  const pid = String(d.pid || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 40);
+  if (!pid) return;
+  if (d.t === "hello") {
+    const name = String(d.name || "Joueur").trim().slice(0, 30) || "Joueur";
+    let p = G.players.get(pid);
+    if (!p) { p = { wins: 0, guess: null, color: COLORS[G.players.size % COLORS.length] }; G.players.set(pid, p); }
+    Object.assign(p, { name, online: true });
+    sendState(pid); publishLobby(); renderGM();
+  } else if (d.t === "guess") {
+    const p = G.players.get(pid);
+    const lat = Number(d.lat), lon = Number(d.lon);
+    if (!p || G.status !== "open" || d.round !== G.round || !(lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180)) return;
+    if (!(d.at <= G.endsAt)) { p.late = G.round; sendState(pid); return; }   // horodatage du serveur : l'heure des PC ne compte pas
+    p.guess = { round: G.round, lat, lon };
+    sendState(pid); publishLobby(); renderGM();
+  }
+}
+function gmMode() { return G.status === "ended" ? "ended" : G.status === "open" ? "live" : G.status === "revealed" && !G.drafting ? "results" : "draft"; }
+
+function renderGM() {
+  const mode = gmMode();
+  $("roundLabel").textContent = G.round ? "· manche " + G.round : "";
+  const parts = [];
+  if (G.error) parts.push(h("div", { class: "card notice" }, h("p", { text: G.error })));
+  parts.push(inviteCard());
+
+  if (mode === "ended") {
+    setPickable(false); onPick = null; drawPins([]);
+    $("mapHint").textContent = "Partie terminée.";
+    parts.push(finalCard(finalStandings(), null));
+    parts.push(h("div", { class: "card" }, h("h2", { text: "Rejouer" }),
+      h("p", { class: "muted small", text: "Les joueurs restent connectés ; les scores repartent de zéro." }),
+      h("button", { class: "btn red", onclick: newGame }, "Lancer une nouvelle partie")));
+    side.replaceChildren(...parts);
+    return;
+  }
+  if (mode === "draft") {
+    setPickable(true);
+    onPick = (lat, lon) => { G.draft.pos = { lat, lon }; renderGM(); };
+    $("mapHint").textContent = "Cliquez où la photo a été prise (zoomez pour être précis). Vous seul voyez ce point.";
+    drawPins(G.draft.pos ? [{ ...G.draft.pos, answer: true, label: "Photo" }] : []);
+    parts.push(photoCard(G.draft.photo, "Choisissez une photo depuis votre ordinateur", "Brouillon"));
+    parts.push(draftCard());
+  } else if (mode === "live") {
+    setPickable(false); onPick = null;
+    $("mapHint").textContent = "Manche en cours. Les réponses des joueurs restent cachées jusqu'à la révélation.";
+    drawPins([{ ...G.secret, answer: true, label: "Photo" }]);
+    parts.push(photoCard(G.photo, "", "Manche " + G.round));
+    const online = [...G.players.values()].filter(p => p.online);
+    const answered = [...G.players.values()].filter(p => p.guess && p.guess.round === G.round);
+    parts.push(h("div", { class: "card" },
+      h("h2", { text: answered.length + " réponse" + (answered.length > 1 ? "s" : "") + " sur " + online.length + " joueur" + (online.length > 1 ? "s" : "") + " connecté" + (online.length > 1 ? "s" : "") }),
+      playersList(true),
+      h("p", { class: "muted small", text: "Les résultats s'afficheront automatiquement à la fin du compte à rebours. Les réponses arrivées après ne comptent pas." }),
+      h("p", { style: "margin-top:.8rem" }, h("button", { class: "btn red", onclick: reveal }, "Révéler maintenant"))));
+  } else {
+    setPickable(false); onPick = null;
+    $("mapHint").textContent = "Distances à vol d'oiseau (orthodromie) entre chaque clic et le lieu de la photo.";
+    drawPins(revealPins(G.secret, G.results, pid => G.players.get(pid)));
+    parts.push(photoCard(G.photo, "", "Manche " + G.round));
+    parts.push(h("div", { class: "card" }, h("h2", { text: "Résultats" }),
+      winnerLine(G.results), rankingList(G.results, null),
+      h("p", { style: "margin-top:.9rem" }, h("button", { class: "btn", onclick: () => { G.drafting = true; G.draft = { photo: null, pos: null }; renderGM(); } }, "Préparer la manche suivante"))));
+  }
+  parts.push(tallyCard([...G.players.entries()].map(([pid, p]) => ({ pid, ...p })), null));
+  if (G.round > 0) parts.push(h("div", { class: "card" }, h("h2", { text: "Fin de partie" }),
+    h("p", { class: "muted small", text: "Affiche le classement final chez tous les joueurs." + (G.status === "open" ? " La manche en cours ne sera pas comptée." : "") }),
+    h("button", { class: "btn ghost", onclick: endGame }, "Terminer la partie")));
+  side.replaceChildren(...parts);
+}
+function inviteCard() {
+  const link = inviteLink();
+  const ready = G.ready;
+  const copy = (txt, btn) => {
+    const done = () => { btn.textContent = "Copié"; setTimeout(() => btn.textContent = "Copier le lien d'invitation", 1800); };
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(done, () => prompt("Copiez ce lien :", txt));
+    else prompt("Copiez ce lien :", txt);
+  };
+  const copyBtn = link ? h("button", { class: "btn ghost", disabled: !ready }, "Copier le lien d'invitation") : null;
+  if (copyBtn) copyBtn.addEventListener("click", () => copy(link, copyBtn));
+  return h("div", { class: "card" }, h("h2", { text: "Code de la partie" }),
+    h("div", { class: "bigcode", text: ready ? G.code : "· · · · ·" }),
+    link ? h("div", { class: "stack" }, copyBtn, h("p", { class: "muted small", text: "Envoyez ce lien aux joueurs : ils n'ont qu'à saisir leur prénom." })) :
+      h("div", { class: "stack" },
+        h("p", { class: "muted small", text: "Envoyez aux joueurs le fichier du jeu (Teams, mail…) avec ce code. Ils l'ouvrent dans Chrome, saisissent leur prénom et le code." }),
+        !BAKED_DB_URL ? h("button", { class: "btn ghost", onclick: downloadBaked }, "Télécharger le fichier pour les joueurs") : null),
+    G.players.size && gmMode() !== "live" ? playersList(false) : null);
+}
+function playersList(showAnswered) {
+  const list = [...G.players.values()];
+  if (!list.length) return h("p", { class: "muted small", text: "Aucun joueur connecté pour l'instant." });
+  return h("ol", { class: "rank" }, list.map((p, i) => {
+    const answered = p.guess && p.guess.round === G.round;
+    return h("li", { class: p.online ? "" : "off" },
+      h("span", { class: "pos", text: String(i + 1) }), h("span", { class: "dot", style: "background:" + p.color }),
+      h("span", { class: "name", text: p.name + (p.online ? "" : " (déconnecté)") }),
+      h("span", { class: "km", text: showAnswered ? (answered ? "✓ répondu" : "…") : "" }));
+  }));
+}
+function draftCard() {
+  const fileIn = h("input", { type: "file", accept: "image/*", hidden: true });
+  fileIn.addEventListener("change", async () => {
+    const f = fileIn.files[0]; if (!f) return;
+    G.busy = "photo"; G.error = ""; renderGM();
+    try { G.draft.photo = await reencode(f); }
+    catch (e) { G.error = "Ce fichier n'est pas une image lisible par Chrome. Pour une photo d'iPhone (HEIC), exportez-la d'abord en JPEG."; }
+    G.busy = ""; renderGM();
+  });
+  const coordIn = h("input", { type: "text", placeholder: "43.2965, 5.3698", "aria-label": "Coordonnées" });
+  const searchIn = h("input", { type: "text", placeholder: "Ex. : Calanque de Sormiou", "aria-label": "Rechercher un lieu", value: G.search && G.search.q || "" });
+  const doSearch = async () => {
+    const q = searchIn.value.trim(); if (!q) return;
+    G.search = { q, loading: true, items: [] }; renderGM();
+    try {
+      const r = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=5&accept-language=fr&q=" + encodeURIComponent(q));
+      const items = await r.json();
+      G.search = { q, items: items.map(x => ({ name: x.display_name, lat: +x.lat, lon: +x.lon })) };
+    } catch (e) { G.search = { q, items: [], error: true }; }
+    renderGM();
+  };
+  searchIn.addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+  const placeCoords = () => {
+    const p = parseCoords(coordIn.value);
+    if (!p) { G.error = "Format attendu : latitude, longitude en degrés décimaux, par exemple 43.2965, 5.3698."; renderGM(); return; }
+    G.error = ""; G.draft.pos = p; map.setView([p.lat, p.lon], 15); renderGM();
+  };
+  coordIn.addEventListener("keydown", e => { if (e.key === "Enter") placeCoords(); });
+  const durIn = h("input", { type: "number", min: "10", max: "900", step: "5", value: String(G.duration), style: "width:7rem;padding:.5rem .7rem;border:1.5px solid var(--line);border-radius:8px;background:var(--bg)" });
+  durIn.addEventListener("change", () => {
+    const v = Math.round(Number(durIn.value));
+    G.duration = Number.isFinite(v) ? Math.min(900, Math.max(10, v)) : 60;
+    durIn.value = String(G.duration);
+  });
+  const hasPhoto = !!G.draft.photo, hasPos = !!G.draft.pos, ready = G.ready;
+  const sr = G.search;
+  return h("div", { class: "card" }, h("h2", { text: "Préparer la manche " + (G.round + 1) }),
+    h("ol", { class: "steps" },
+      h("li", { class: hasPhoto ? "done" : "" }, h("span", { class: "n", text: "1" }), h("div", null,
+        h("h3", { text: "Choisir la photo" }),
+        h("p", { class: "muted small", text: "Les métadonnées GPS de la photo sont retirées avant l'envoi aux joueurs." }),
+        fileIn, h("button", { class: "btn ghost", disabled: G.busy === "photo", onclick: () => fileIn.click() }, G.busy === "photo" ? "Préparation…" : hasPhoto ? "Changer de photo" : "Choisir une photo"))),
+      h("li", { class: hasPos ? "done" : "" }, h("span", { class: "n", text: "2" }), h("div", { class: "stack" },
+        h("h3", { text: "La placer sur la carte" }),
+        h("p", { class: "small coords", text: hasPos ? fmtCoord(G.draft.pos) : "Cliquez sur la carte, cherchez un lieu ou collez des coordonnées." }),
+        h("div", { class: "row" }, searchIn, h("button", { class: "btn ghost", onclick: doSearch }, "Chercher")),
+        sr && sr.loading ? h("p", { class: "muted small", text: "Recherche…" }) : null,
+        sr && sr.error ? h("p", { class: "small", text: "La recherche n'a pas répondu. Cliquez directement sur la carte." }) : null,
+        sr && !sr.loading && !sr.error && !sr.items.length ? h("p", { class: "muted small", text: "Aucun lieu trouvé pour « " + sr.q + " »." }) : null,
+        sr && sr.items.length ? h("ul", { class: "results-search" }, sr.items.map(it => h("li", null, h("button", { onclick: () => { G.search = null; map.setView([it.lat, it.lon], 14); renderGM(); } }, it.name)))) : null,
+        h("div", { class: "row" }, coordIn, h("button", { class: "btn ghost", onclick: placeCoords }, "Placer")),
+        h("p", { class: "muted small", text: "La recherche centre la carte ; cliquez ensuite à l'endroit exact." }))),
+      h("li", null, h("span", { class: "n", text: "3" }), h("div", null,
+        h("h3", { text: "Lancer la manche" }),
+        h("label", { class: "f", style: "margin-bottom:.5rem" }, "Temps pour répondre (secondes)", durIn),
+        h("p", { class: "muted small", text: G.players.size ? "Les joueurs connectés recevront la photo immédiatement." : "Vous pouvez lancer avant l'arrivée des joueurs : ils recevront la photo en se connectant." }),
+        h("button", { class: "btn red", disabled: !hasPhoto || !hasPos || !ready, onclick: launch }, "Lancer la manche")))),
+    G.status === "revealed" ? h("p", { style: "margin-top:.8rem" }, h("button", { class: "linkbtn", onclick: () => { G.drafting = false; renderGM(); } }, "Revoir les résultats précédents")) : null);
+}
+function launch() {
+  G.round += 1; G.status = "open"; G.photo = G.draft.photo; G.secret = { ...G.draft.pos }; G.results = []; G.drafting = false; G.error = "";
+  G.endsAt = serverNow() + G.duration * 1000;
+  const r = G.round;
+  startTimer(G.endsAt - serverNow(), () => { if (G.status === "open" && G.round === r) setTimeout(reveal, 1500); });
+  G.ref.child("photo").set({ round: G.round, data: G.photo })
+    .then(publishAll)
+    .catch(e => { G.error = "La photo n'a pas pu être envoyée : " + fbErrText(e); renderGM(); });
+  renderGM();
+}
+function reveal() {
+  if (G.status !== "open") return;
+  stopTimer();
+  const ans = G.secret;
+  G.results = [...G.players.entries()]
+    .filter(([, p]) => p.guess && p.guess.round === G.round)
+    .map(([pid, p]) => ({ pid, name: p.name, color: p.color, lat: p.guess.lat, lon: p.guess.lon, km: haversineKm(p.guess, ans) }))
+    .sort((a, b) => a.km - b.km);
+  if (G.results.length) {
+    const best = G.results[0].km;
+    G.results.filter(r => r.km === best).forEach(r => { G.players.get(r.pid).wins += 1; });
+  }
+  G.status = "revealed";
+  publishAll();
+  fitPoints([ans, ...G.results]);
+  renderGM();
+}
+
+function finalStandings() {
+  return [...G.players.entries()].map(([pid, p]) => ({ pid, name: p.name, color: p.color, wins: p.wins }))
+    .sort((a, b) => b.wins - a.wins);
+}
+function endGame() {
+  if (!confirm("Terminer la partie ? Le classement final sera affiché chez tous les joueurs." + (G.status === "open" ? "\nLa manche en cours ne sera pas comptée." : ""))) return;
+  stopTimer();
+  G.status = "ended"; G.drafting = false;
+  publishAll();
+  renderGM();
+}
+function newGame() {
+  for (const [pid, p] of G.players) { if (!p.online) G.players.delete(pid); else { p.wins = 0; p.guess = null; } }
+  G.round = 0; G.status = "idle"; G.photo = null; G.secret = null; G.results = [];
+  G.draft = { photo: null, pos: null }; G.drafting = true; G.error = "";
+  map.setView([30, 10], 2);
+  G.ref.child("photo").remove().catch(() => {});
+  publishAll();
+  renderGM();
+}
+
+/* ===== Affichages partagés ===== */
+function revealPins(ans, results) {
+  const pins = results.map(r => ({ lat: r.lat, lon: r.lon, color: r.color, label: r.name + " · " + fmtKm(r.km), arcTo: ans }));
+  pins.push({ ...ans, answer: true, label: "Photo" });
+  return pins;
+}
+function winnerLine(results) {
+  if (!results.length) return h("p", { class: "muted", text: "Personne n'a répondu à cette manche." });
+  const best = results[0].km, w = results.filter(r => r.km === best).map(r => r.name);
+  return h("p", { class: "winner", text: (w.length > 1 ? "Égalité : " + w.join(", ") : w[0] + " gagne") + " — à " + fmtKm(best) });
+}
+function rankingList(results, mePid) {
+  const best = results.length ? results[0].km : null;
+  return h("ol", { class: "rank" }, results.map((r, i) => h("li", { class: (r.km === best ? "win " : "") + (r.pid === mePid ? "me" : "") },
+    h("span", { class: "pos", text: String(i + 1) }), h("span", { class: "dot", style: "background:" + r.color }),
+    h("span", { class: "name", text: r.name + (r.pid === mePid ? " (vous)" : "") }), h("span", { class: "km", text: fmtKm(r.km) }))));
+}
+function finalCard(list, mePid) {
+  if (!list.length) return h("div", { class: "card" }, h("h2", { text: "Partie terminée" }), h("p", { class: "muted", text: "Aucun joueur n'a participé." }));
+  const top = list[0].wins, champs = list.filter(p => p.wins === top).map(p => p.name);
+  let pos = 0, prev = null;
+  return h("div", { class: "card" }, h("h2", { text: "Partie terminée" }),
+    h("p", { class: "winner", text: top === 0 ? "Aucune manche gagnée" : (champs.length > 1 ? "Ex æquo : " + champs.join(", ") : champs[0] + " remporte la partie") }),
+    h("ol", { class: "rank" }, list.map((p, i) => {
+      if (p.wins !== prev) { pos = i + 1; prev = p.wins; }
+      return h("li", { class: (p.wins === top && top > 0 ? "win " : "") + (p.pid === mePid ? "me" : "") },
+        h("span", { class: "pos", text: String(pos) }), h("span", { class: "dot", style: "background:" + p.color }),
+        h("span", { class: "name", text: p.name + (p.pid === mePid ? " (vous)" : "") }),
+        h("span", { class: "km", text: p.wins + (p.wins > 1 ? " manches" : " manche") }));
+    })));
+}
+function tallyCard(players, mePid) {
+  const list = players.filter(p => p.wins > 0).sort((a, b) => b.wins - a.wins);
+  if (!list.length) return null;
+  return h("div", { class: "card" }, h("h2", { text: "Manches gagnées" }),
+    h("ol", { class: "rank" }, list.map((p, i) => h("li", { class: p.pid === mePid ? "me" : "" },
+      h("span", { class: "pos", text: String(i + 1) }), h("span", { class: "dot", style: "background:" + p.color }),
+      h("span", { class: "name", text: p.name }), h("span", { class: "km", text: String(p.wins) })))));
+}
+
+/* =====================================================================
+   JOUEUR
+   ===================================================================== */
+const P = { ref: null, code: "", name: "", pid: "", game: null, lobby: [], pending: null, myGuess: null, sending: false, error: "", lastRound: null, lastStatus: null, photo: null, joined: false, hostOnline: true };
+async function startPlayer(name, code) {
+  S.role = "player"; P.name = name; P.code = code;
+  P.pid = store.get("ouestce-pid") || ("p" + randCode(12)); store.set("ouestce-pid", P.pid);
+  try { history.replaceState(null, "", "#" + code); } catch (e) { /* file:// */ }
+  setStatus("Connexion à la partie " + code + "…");
+  renderPlayer();
+  if (!(await waitConnected(10000))) {
+    P.error = "Le serveur du jeu est injoignable depuis ce réseau (le proxy de l'entreprise bloque peut-être Firebase).";
+    setStatus("Hors ligne", "off"); renderPlayer(); return;
+  }
+  P.ref = db.ref("games/" + code);
+  try {
+    if (!(await P.ref.child("meta").get()).exists()) {
+      P.error = "Partie " + code + " introuvable. Vérifiez le code donné par le maître du jeu.";
+      setStatus("Partie introuvable", "off"); renderPlayer(); return;
+    }
+  } catch (e) { P.error = fbErrText(e); renderPlayer(); return; }
+  P.joined = true;
+  onConn = c => {
+    setStatus(c ? "Connecté à la partie " + P.code : "Connexion perdue, reconnexion…", c ? "on" : "off");
+    if (c) {
+      const pr = P.ref.child("presence/" + P.pid);
+      pr.onDisconnect().remove(); pr.set({ name: P.name });
+      sendToGM({ t: "hello", name: P.name });
+    }
+    renderPlayer();
+  };
+  onConn(fbConnected);
+  P.ref.child("out/" + P.pid).on("value", s => { if (s.exists()) onGMData(s.val()); });
+  P.ref.child("lobby").on("value", s => { const v = s.val(); P.lobby = v && v.players ? Object.values(v.players) : []; renderPlayer(); });
+  P.ref.child("photo").on("value", s => { P.photo = s.val(); renderPlayer(); });
+  P.ref.child("host/online").on("value", s => { P.hostOnline = s.val() !== false; renderPlayer(); });
+}
+function sendToGM(msg) {
+  return P.ref.child("inbox").push(Object.assign({}, msg, { pid: P.pid, at: TS() }));
+}
+const curPhoto = () => P.photo && P.game && P.photo.round === P.game.round ? P.photo.data : null;
+function onGMData(d) {
+  if (!d || typeof d !== "object") return;
+  if (d.t === "state") {
+    const changedRound = d.round !== P.lastRound;
+    P.game = d;
+    P.myGuess = d.myGuess || (changedRound ? null : P.myGuess);
+    if (changedRound) { P.pending = null; P.error = ""; P.sending = false; }
+    if (P.sending && d.myGuess) { P.sending = false; P.pending = null; }
+    if (P.sending && d.late) { P.sending = false; P.pending = null; P.error = "Temps écoulé : votre réponse est arrivée trop tard et n'est pas prise en compte."; }
+    if (d.status === "revealed" && P.lastStatus !== "revealed" && d.answer) fitPoints([d.answer, ...(d.results || [])]);
+    if (d.status === "open" && changedRound && P.lastRound !== null) map.setView([30, 10], 2);
+    if (d.status === "open" && typeof d.endsAt === "number") startTimer(d.endsAt - serverNow(), () => renderPlayer());
+    else stopTimer();
+    if (d.status === "idle" && d.round === 0) { P.myGuess = null; P.pending = null; }
+    P.lastRound = d.round; P.lastStatus = d.status;
+    renderPlayer();
+  } else if (d.t === "lobby") { P.lobby = Array.isArray(d.players) ? d.players : []; renderPlayer(); }
+  else if (d.t === "late") { if (P.game && d.round === P.game.round) { P.sending = false; P.pending = null; P.error = "Temps écoulé : votre réponse est arrivée trop tard et n'est pas prise en compte."; renderPlayer(); } }
+  else if (d.t === "ack") { if (P.game && d.round === P.game.round) { P.myGuess = { lat: d.lat, lon: d.lon }; P.pending = null; P.sending = false; renderPlayer(); } }
+}
+function renderPlayer() {
+  const g = P.game || {}, parts = [];
+  $("roundLabel").textContent = g.round ? "· manche " + g.round : "";
+  if (P.error) parts.push(h("div", { class: "card notice" }, h("p", { text: P.error }),
+    h("button", { class: "btn ghost", onclick: () => { location.reload(); } }, "Réessayer")));
+  if (P.joined && !P.hostOnline && g.status !== "ended") parts.push(h("div", { class: "card notice" },
+    h("p", { text: "Le maître du jeu s'est déconnecté. La partie reprendra s'il revient sur sa page." })));
+  if (g.status === "open" && timeIsUp()) {
+    setPickable(false); onPick = null;
+    $("mapHint").textContent = "Temps écoulé. Les résultats arrivent.";
+    drawPins(P.myGuess ? [{ ...P.myGuess, color: "#15232B", label: "Ma réponse" }] : []);
+    parts.push(photoCard(curPhoto(), "Chargement de la photo…", "Manche " + g.round));
+    parts.push(h("div", { class: "card" }, h("h2", { text: "Temps écoulé" }),
+      P.myGuess ? h("p", { class: "ok", text: "Votre réponse est prise en compte. Résultats dans un instant." }) :
+        h("p", { text: "Vous n'avez pas envoyé de réponse à temps : cette manche ne compte pas pour vous." })));
+  } else if (g.status === "ended") {
+    setPickable(false); onPick = null; drawPins([]);
+    $("mapHint").textContent = "Partie terminée. Restez sur cette page : une nouvelle partie peut démarrer.";
+    parts.push(finalCard(g.final || [], P.pid));
+  } else if (g.status === "open") {
+    setPickable(true);
+    onPick = (lat, lon) => { P.pending = { lat, lon }; renderPlayer(); };
+    $("mapHint").textContent = "Cliquez à l'endroit où, selon vous, la photo a été prise. Plan, satellite ou relief : bouton en haut à droite.";
+    const shown = P.pending || P.myGuess;
+    drawPins(shown ? [{ ...shown, color: "#15232B", ghost: !!P.pending, label: P.pending ? "Mon choix" : "Ma réponse" }] : []);
+    parts.push(photoCard(curPhoto(), "Chargement de la photo…", "Manche " + g.round));
+    parts.push(h("div", { class: "card" },
+      h("h2", { text: P.myGuess && !P.pending ? "Réponse envoyée" : "Votre réponse" }),
+      h("p", { class: "small coords", text: shown ? fmtCoord(shown) : "Aucun point placé pour l'instant." }),
+      P.pending && P.myGuess ? h("p", { class: "small", text: "Nouveau point non envoyé : c'est votre réponse précédente qui compte tant que vous n'envoyez pas." }) :
+      P.pending ? h("p", { class: "small", text: "Pensez à envoyer avant la fin du compte à rebours : un point non envoyé ne compte pas." }) : null,
+      P.myGuess && !P.pending ? h("p", { class: "ok small", text: "Le maître du jeu a bien reçu votre réponse. Vous pouvez la changer jusqu'à la révélation." }) : null,
+      h("p", null, h("button", { class: "btn red", disabled: !P.pending || P.sending || !fbConnected, onclick: () => {
+        P.sending = true; renderPlayer();
+        sendToGM({ t: "guess", round: g.round, lat: P.pending.lat, lon: P.pending.lon }).catch(e => { P.sending = false; P.error = fbErrText(e); renderPlayer(); });
+        setTimeout(() => { if (P.sending) { P.sending = false; P.error = "Réponse non confirmée par le maître du jeu. Réessayez."; renderPlayer(); } }, 8000);
+      } }, P.sending ? "Envoi…" : P.myGuess ? "Remplacer ma réponse" : "Envoyer ma réponse"))));
+  } else if (g.status === "revealed") {
+    setPickable(false); onPick = null;
+    $("mapHint").textContent = "Distances à vol d'oiseau (orthodromie) entre chaque clic et le lieu de la photo.";
+    const res = g.results || [];
+    drawPins(revealPins(g.answer, res));
+    const myRank = res.findIndex(r => r.pid === P.pid);
+    parts.push(photoCard(curPhoto(), "Chargement de la photo…", "Manche " + g.round));
+    parts.push(h("div", { class: "card" }, h("h2", { text: "Résultats de la manche" }), winnerLine(res),
+      myRank >= 0 ? h("p", { class: "small", text: "Vous êtes " + (myRank === 0 ? "1er" : (myRank + 1) + "e") + " sur " + res.length + ", à " + fmtKm(res[myRank].km) + "." }) :
+        h("p", { class: "muted small", text: "Vous n'avez pas répondu à cette manche." }),
+      rankingList(res, P.pid),
+      h("p", { class: "muted small", text: "La photo suivante apparaîtra ici dès que le maître du jeu lancera la manche." })));
+  } else {
+    setPickable(false); onPick = null; drawPins([]);
+    $("mapHint").textContent = "Molette pour zoomer, glisser pour déplacer.";
+    parts.push(photoCard(null, P.joined && fbConnected ? "Connecté ! Le maître du jeu prépare la première photo." : "Connexion à la partie…"));
+    parts.push(h("div", { class: "card" }, h("h2", { text: "Comment jouer" }),
+      h("p", { text: "Observez la photo, puis cliquez sur la carte là où vous pensez qu'elle a été prise. Le joueur le plus proche du vrai lieu gagne la manche." }),
+      h("p", { class: "muted small", text: "Votre réponse n'est visible que du maître du jeu jusqu'à la révélation." })));
+  }
+  if (P.lobby.length) {
+    parts.push(h("div", { class: "card" }, h("h2", { text: "Joueurs" }),
+      h("ol", { class: "rank" }, P.lobby.map((p, i) => h("li", { class: (p.pid === P.pid ? "me " : "") + (p.online ? "" : "off") },
+        h("span", { class: "pos", text: String(i + 1) }), h("span", { class: "dot", style: "background:" + p.color }),
+        h("span", { class: "name", text: p.name + (p.pid === P.pid ? " (vous)" : "") }),
+        h("span", { class: "km", text: g.status === "open" ? (p.answered ? "✓" : "…") : (p.wins ? p.wins + " ★" : "") }))))));
+  }
+  side.replaceChildren(...parts);
+}
+
+/* ===== Démarrage ===== */
+renderHome();
+})();
+</script>
+</body>
+</html>
